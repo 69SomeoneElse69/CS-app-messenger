@@ -1,0 +1,2 @@
+2021-12-03 16:49:24,735 DEBUG    server.py Разбор сообщения от клиента : {'action': 'presence', 'time': 1.1, 'user': {'account_name': 'Guest'}}
+2021-12-03 16:49:24,738 DEBUG    server.py Разбор сообщения от клиента : {'action': 'Wrong', 'time': '1.1', 'user': {'account_name': 'Guest'}}
