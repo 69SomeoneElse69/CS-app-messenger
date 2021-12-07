@@ -2,66 +2,63 @@
 
 import socket
 import sys
+import argparse
 import json
-from common.variables import ACTION, ACCOUNT_NAME, RESPONSE, MAX_CONNECTIONS, \
-    PRESENCE, TIME, USER, ERROR, DEFAULT_PORT, RESPONDEFAULT_IP_ADDRESSSE
+import logging
+import logs.config_server_log
+from common.errors import IncorrectDataRecivedError
+from common.variables import ACTION, USER, ACCOUNT_NAME, PRESENCE, \
+    TIME, DEFAULT_PORT, MAX_CONNECTIONS, RESPONSE, ERROR
 from common.utils import message_in, message_out
+from decos import log
 
 
+# Инициализация логирования сервера.
+LOGGER = logging.getLogger('server')
+
+
+@log
 def server_answer_out(message):
-    '''
-    Обработчик сообщений от клиентов, принимает словарь -
-    сообщение от клинта, проверяет корректность,
-    возвращает словарь-ответ для клиента
-
+    """
+    Обработчик сообщений от клиентов, принимает словарь - сообщение от клинта,
+    проверяет корректность, возвращает словарь-ответ для клиента
     :param message:
     :return:
-    '''
-    if ACTION in message and message[ACTION] == PRESENCE and TIME in message \
-            and USER in message and message[USER][ACCOUNT_NAME] == 'Guest':
+    """
+    LOGGER.debug(f'Разбор сообщения от клиента : {message}')
+    if ACTION in message and message[ACTION] == PRESENCE and TIME in message and \
+            USER in message and message[USER][ACCOUNT_NAME] == 'Guest':
         return {RESPONSE: 200}
     return {
-        RESPONDEFAULT_IP_ADDRESSSE: 400,
+        RESPONSE: 400,
         ERROR: 'Bad Request'
     }
 
 
+@log
+def create_arg_parser():
+    """Парсер аргументов коммандной строки"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-p', default=DEFAULT_PORT, type=int, nargs='?')
+    parser.add_argument('-a', default='', nargs='?')
+    return parser
+
+
 def main():
-    '''
-    Загрузка параметров командной строки, если нет параметров, то задаём значения по умоланию.
-    Сначала обрабатываем порт:
-    server.py -p 8888 -a 127.0.0.1
-    :return:
-    '''
+    """Загрузка параметров командной строки, если нет параметров, то задаём значения по умоланию"""
+    parser = create_arg_parser()
+    namespace = parser.parse_args(sys.argv[1:])
+    listen_address = namespace.a
+    listen_port = namespace.p
 
-    try:
-        if '-p' in sys.argv:
-            listen_port = int(sys.argv[sys.argv.index('-p') + 1])
-        else:
-            listen_port = DEFAULT_PORT
-        if listen_port < 1024 or listen_port > 65535:
-            raise ValueError
-    except IndexError:
-        print('После параметра -\'p\' необходимо указать номер порта.')
+    # проверка получения корретного номера порта для работы сервера.
+    if not 1023 < listen_port < 65536:
+        LOGGER.critical(f'Попытка запуска сервера с указанием неподходящего порта {listen_port}. '
+                        f'Допустимы адреса с 1024 до 65535.')
         sys.exit(1)
-    except ValueError:
-        print(
-            'В качастве порта может быть указано только число в диапазоне от 1024 до 65535.')
-        sys.exit(1)
-
-    # Затем загружаем какой адрес слушать
-
-    try:
-        if '-a' in sys.argv:
-            listen_address = sys.argv[sys.argv.index('-a') + 1]
-        else:
-            listen_address = ''
-
-    except IndexError:
-        print(
-            'После параметра \'a\'- необходимо указать адрес, который будет слушать сервер.')
-        sys.exit(1)
-
+    LOGGER.info(f'Запущен сервер, порт для подключений: {listen_port}, адрес,'
+                f' с которого принимаются подключения: {listen_address}. '
+                f'Если адрес не указан, принимаются соединения с любых адресов.')
     # Готовим сокет
 
     transport = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -73,14 +70,23 @@ def main():
 
     while True:
         client, client_address = transport.accept()
+        LOGGER.info(f'Установлено соедение с ПК {client_address}')
         try:
             message_from_cient = message_in(client)
+            LOGGER.debug(f'Получено сообщение {message_from_cient}')
             print(message_from_cient)
             response = server_answer_out(message_from_cient)
+            LOGGER.info(f'Cформирован ответ клиенту {response}')
             message_out(client, response)
+            LOGGER.debug(f'Соединение с клиентом {client_address} закрывается.')
             client.close()
-        except (ValueError, json.JSONDecodeError):
-            print('Принято некорретное сообщение от клиента.')
+        except json.JSONDecodeError:
+            LOGGER.error(f'Не удалось декодировать Json строку, '
+                         f'полученную от клиента {client_address}. Соединение закрывается.')
+            client.close()
+        except IncorrectDataRecivedError:
+            LOGGER.error(f'От клиента {client_address} приняты некорректные данные. '
+                         f'Соединение закрывается.')
             client.close()
 
 
